@@ -1,74 +1,54 @@
 import datetime
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from config import GOOGLE_CREDENTIALS_FILE, GOOGLE_TOKEN_FILE
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from config import GOOGLE_TOKEN_DATA
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 def get_credentials():
-    creds = None
+    if not GOOGLE_TOKEN_DATA:
+        raise RuntimeError("GOOGLE_TOKEN_JSON env var is missing!")
 
-    # Load existing token
-    try:
-        creds = Credentials.from_authorized_user_file(GOOGLE_TOKEN_FILE, SCOPES)
-    except Exception:
-        pass
+    creds = Credentials(
+        token=GOOGLE_TOKEN_DATA["token"],
+        refresh_token=GOOGLE_TOKEN_DATA["refresh_token"],
+        token_uri=GOOGLE_TOKEN_DATA["token_uri"],
+        client_id=GOOGLE_TOKEN_DATA["client_id"],
+        client_secret=GOOGLE_TOKEN_DATA["client_secret"],
+        scopes=GOOGLE_TOKEN_DATA["scopes"],
+    )
 
-    # Refresh if expired
-    if creds and creds.expired and creds.refresh_token:
+    if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            with open(GOOGLE_TOKEN_FILE, "w") as f:
-                f.write(creds.to_json())
-            return creds
+            print("[calendar_utils] Token refreshed ✅")
         except Exception as e:
-            print(f"[calendar_utils] Token refresh failed: {e}")
-            creds = None
-
-    # If still no valid creds, run OAuth flow (only works locally)
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            GOOGLE_CREDENTIALS_FILE, SCOPES
-        )
-        creds = flow.run_local_server(port=0)
-        with open(GOOGLE_TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
+            print(f"[calendar_utils] Refresh failed: {e}")
+            raise
 
     return creds
 
 
 def create_google_meet(meeting: dict) -> str:
-    """
-    Creates a Google Calendar event with a Meet link.
-    Sends email invite to participant_email.
-    Returns the Google Meet link.
-    """
     creds   = get_credentials()
     service = build("calendar", "v3", credentials=creds)
 
     start_time = datetime.datetime.fromisoformat(
         f"{meeting['meeting_date']}T{meeting['meeting_time']}:00"
     )
-    end_time = start_time + datetime.timedelta(minutes=int(meeting["duration_minutes"]))
+    end_time = start_time + datetime.timedelta(
+        minutes=int(meeting["duration_minutes"])
+    )
 
     event = {
         "summary":     meeting.get("agenda", "Meeting"),
         "description": "Scheduled via EquitySoft AI Meeting Scheduler Bot 🤖",
-        "start": {
-            "dateTime": start_time.isoformat(),
-            "timeZone": "Asia/Kolkata",
-        },
-        "end": {
-            "dateTime": end_time.isoformat(),
-            "timeZone": "Asia/Kolkata",
-        },
+        "start": {"dateTime": start_time.isoformat(), "timeZone": "Asia/Kolkata"},
+        "end":   {"dateTime": end_time.isoformat(),   "timeZone": "Asia/Kolkata"},
         "conferenceData": {
-            "createRequest": {
-                "requestId": f"meet-{int(start_time.timestamp())}"
-            }
+            "createRequest": {"requestId": f"meet-{int(start_time.timestamp())}"}
         },
         "attendees": [],
         "reminders": {
@@ -80,7 +60,6 @@ def create_google_meet(meeting: dict) -> str:
         },
     }
 
-    # Add participant
     if meeting.get("participant_email"):
         event["attendees"].append({"email": meeting["participant_email"]})
 
@@ -88,7 +67,7 @@ def create_google_meet(meeting: dict) -> str:
         calendarId="primary",
         body=event,
         conferenceDataVersion=1,
-        sendUpdates="all",      # sends email invite automatically
+        sendUpdates="all",
     ).execute()
 
     return created_event["hangoutLink"]
