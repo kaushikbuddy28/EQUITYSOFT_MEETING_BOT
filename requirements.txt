@@ -1,0 +1,9 @@
+flask==3.0.0
+flask-cors==4.0.0
+requests==2.31.0
+python-dotenv==1.0.0
+google-generativeai
+google-api-python-client
+google-auth
+google-auth-oauthlib
+gunicorn==21.2.0
